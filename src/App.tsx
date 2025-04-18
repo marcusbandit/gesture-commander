@@ -1,4 +1,4 @@
-import HandTracking3D from './components/HandTracking';
+import TabControl from './components/TabControl';
 import './App.css';
 
 function App() {
@@ -8,7 +8,7 @@ function App() {
         <h1>Gesture Commander</h1>
       </header>
       <main className="app-main">
-        <HandTracking3D />
+        <TabControl />
       </main>
     </div>
   );

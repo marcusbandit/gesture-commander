@@ -1,8 +1,7 @@
 .app {
-  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background-color: #1a1a1a;
+  background: linear-gradient(145deg, #1e1e1e, #181818);
   color: white;
 }
 
