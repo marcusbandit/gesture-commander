@@ -1,16 +1,15 @@
-import TabControl from './components/TabControl';
+import React from 'react';
+import { TabControl } from './components/TabControl';
+import { BrightnessProvider } from './contexts/BrightnessContext';
 import './App.css';
 
 function App() {
   return (
-    <div className="app">
-      <header className="app-header">
-        <h1>Gesture Commander</h1>
-      </header>
-      <main className="app-main">
+    <BrightnessProvider>
+      <div className="App">
         <TabControl />
-      </main>
-    </div>
+      </div>
+    </BrightnessProvider>
   );
 }
 

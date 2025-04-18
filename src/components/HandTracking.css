@@ -1,0 +1,55 @@
+.hand-tracking-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+  width: 100%;
+  min-height: 100vh;
+  padding: 2rem;
+  background: linear-gradient(145deg,
+    rgba(30, 30, 30, 0.95),
+    rgba(24, 24, 24, 0.95));
+}
+
+.video-container {
+  position: relative;
+  width: 100%;
+  max-width: 1280px;
+  aspect-ratio: 16/9;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  background: linear-gradient(145deg,
+    rgba(45, 45, 45, 0.95),
+    rgba(37, 37, 37, 0.95));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2rem;
+}
+
+.video-container video,
+.video-container canvas {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background-color: transparent;
+}
+
+.camera-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 1rem 2rem;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.camera-error p {
+  margin: 0;
+  font-size: 1.1rem;
+}

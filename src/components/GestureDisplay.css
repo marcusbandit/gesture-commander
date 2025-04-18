@@ -1,0 +1,412 @@
+/* Add noise texture for smoother gradients */
+@property --gradient-angle {
+  syntax: '<angle>';
+  initial-value: 145deg;
+  inherits: false;
+}
+
+@keyframes noise {
+  0% { background-position: 0 0; }
+  100% { background-position: 100% 100%; }
+}
+
+.gesture-display {
+  background: linear-gradient(145deg, 
+    rgba(45, 45, 45, 0.95),
+    rgba(37, 37, 37, 0.95));
+  padding: 1.5rem 2rem;
+  border-radius: 12px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 1280px;
+}
+
+.confidence-bar {
+  width: 100%;
+  height: 20px;
+  background: linear-gradient(145deg,
+    rgba(51, 51, 51, 0.95),
+    rgba(42, 42, 42, 0.95));
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.confidence-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg,
+    rgba(56, 142, 60, 0.95),
+    rgba(76, 175, 80, 0.95));
+}
+
+.cooldown-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg,
+    rgba(56, 142, 60, 0.95),
+    rgba(76, 175, 80, 0.95));
+  transition: width 4s ease-in-out;
+}
+
+.cooldown-bar-fill[style*="width: 100"] {
+  transition-duration: 500ms;
+}
+
+.cooldown-bar-fill[style*="width: 0"] {
+  transition-duration: 4000ms;
+}
+
+.hand-info {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.hand-card {
+  background: linear-gradient(145deg,
+    rgba(56, 56, 56, 0.95),
+    rgba(46, 46, 46, 0.95));
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 250px;
+  width: 100%;
+}
+
+.finger-straightness {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #444;
+}
+
+.finger-straightness h4 {
+  margin: 0 0 1rem;
+  color: #888;
+}
+
+.finger-metric {
+  margin-bottom: 1rem;
+}
+
+.finger-metric:last-child {
+  margin-bottom: 0;
+}
+
+.finger-metric p {
+  margin: 0 0 0.25rem;
+}
+
+.finger-metric .confidence-bar {
+  margin-top: 0.25rem;
+  height: 12px;
+}
+
+.tracking-indicators {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+}
+
+.tracking-indicators.left {
+  justify-content: flex-start;
+}
+
+.tracking-indicators.right {
+  justify-content: flex-end;
+}
+
+.hand-info-container {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.hand-info-container.left {
+  justify-content: flex-start;
+}
+
+.hand-info-container.right {
+  justify-content: flex-end;
+}
+
+.base-fingers {
+  display: flex;
+  gap: 10px;
+  margin-left: 20px;
+  margin-right: 20px;
+  align-items: end;
+}
+
+.palm-dot {
+  margin-top: 10px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.palm-svg {
+  width: 100%;
+  height: auto;
+  transform: scale(0.8);
+  transition: all 0.2s ease;
+}
+
+.finger-path {
+  fill: rgba(42, 42, 42, 0.95);
+  transition: all 0.2s ease;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+.finger-path.active {
+  fill: rgba(56, 142, 60, 0.95);
+  filter: drop-shadow(0 0 4px rgba(76, 175, 80, 0.5));
+}
+
+.palm-path {
+  fill: rgba(37, 37, 37, 0.95);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+  transition: all 0.2s ease;
+}
+
+.palm-path.active {
+  fill: rgba(56, 142, 60, 0.95);
+  filter: drop-shadow(0 0 4px rgba(76, 175, 80, 0.5));
+}
+
+.tracking-dot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 80px;
+  padding: 0.25rem;
+}
+
+.tracking-dot span {
+  font-size: 0.9rem;
+  color: #888;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 5px;
+  background: linear-gradient(145deg,
+    rgba(51, 51, 51, 0.95),
+    rgba(42, 42, 42, 0.95));
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.dot.palm {
+  width: 100%;
+  height: 50px;
+}
+
+.dot.thumb {
+  width: 10px;
+  height: 60px;
+}
+
+.dot.index {
+  width: 10px;
+  height: 80px;
+}
+
+.dot.middle {
+  width: 10px;
+  height: 90px;
+}
+
+.dot.ring {
+  width: 10px;
+  height: 85px;
+}
+
+.dot.pinky {
+  width: 10px;
+  height: 70px;
+}
+
+.dot.active {
+  background: linear-gradient(145deg,
+    rgba(67, 160, 71, 0.95),
+    rgba(56, 142, 60, 0.95));
+  box-shadow: 0 0 12px rgba(76, 175, 80, 0.5);
+}
+
+/* Tab styling */
+.tabs-container {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.tabs-header {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid #333;
+  padding-bottom: 0.5rem;
+}
+
+.tab-button {
+  background: linear-gradient(145deg,
+    rgba(56, 56, 56, 0.95),
+    rgba(46, 46, 46, 0.95));
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px 8px 0 0;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.tab-button.active {
+  background: linear-gradient(145deg,
+    rgba(67, 160, 71, 0.95),
+    rgba(56, 142, 60, 0.95));
+  box-shadow: 0 -2px 8px rgba(76, 175, 80, 0.3);
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+.configuration-panel {
+  background: linear-gradient(145deg,
+    rgba(56, 56, 56, 0.95),
+    rgba(46, 46, 46, 0.95));
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.light-controls {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: linear-gradient(145deg,
+    rgba(51, 51, 51, 0.95),
+    rgba(42, 42, 42, 0.95));
+  border-radius: 8px;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.light-controls button {
+  background: linear-gradient(145deg,
+    rgba(67, 160, 71, 0.95),
+    rgba(56, 142, 60, 0.95));
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.light-controls button:hover {
+  background: linear-gradient(145deg,
+    rgba(76, 175, 80, 0.95),
+    rgba(67, 160, 71, 0.95));
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.light-controls button:disabled {
+  background: linear-gradient(145deg,
+    rgba(158, 158, 158, 0.95),
+    rgba(117, 117, 117, 0.95));
+  cursor: not-allowed;
+}
+
+.light-controls input[type="range"] {
+  width: 100%;
+  margin: 1rem 0;
+  background: rgba(51, 51, 51, 0.95);
+  border-radius: 8px;
+  height: 8px;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.light-controls input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: linear-gradient(145deg,
+    rgba(76, 175, 80, 0.95),
+    rgba(67, 160, 71, 0.95));
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.light-controls input[type="range"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.light-controls label {
+  display: block;
+  margin-top: 1rem;
+  color: #fff;
+}
+
+.control-indicators {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.control-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  flex: 1;
+}
+
+.control-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #333;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.control-dot.active {
+  background: #4CAF50;
+  box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+}
+
+.progress-ring {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  transform: rotate(-90deg);
+}
+
+.progress-ring path {
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.1s ease;
+}
+
+.control-indicator span {
+  font-size: 14px;
+  color: #fff;
+  font-weight: 500;
+}

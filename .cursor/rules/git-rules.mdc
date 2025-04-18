@@ -1,0 +1,24 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Cursor AI Assistant Rules
+
+# Git Rules
+[git]
+# NEVER make commits without explicit user permission
+require_permission_for_commits = true
+# NEVER push without explicit user permission
+require_permission_for_push = true
+# NEVER revert without explicit user permission
+require_permission_for_revert = true
+# NEVER stash without explicit user permission
+require_permission_for_stash = true
+
+# General Rules
+[assistant]
+# Always wait for user confirmation before making significant changes
+require_user_confirmation = true
+# Be explicit about intended actions
+explain_actions = true 

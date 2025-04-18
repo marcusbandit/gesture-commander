@@ -4,6 +4,7 @@ import { Hands, Results } from '@mediapipe/hands';
 import { Camera } from '@mediapipe/camera_utils';
 import './HandTracking.css';
 import GestureDisplay from './GestureDisplay';
+import { useBrightness } from '../contexts/BrightnessContext';
 
 interface HandTrackingProps {}
 
@@ -11,25 +12,10 @@ interface HandInfo {
   isOpen: boolean;
   openConfidence: number;
   pointingDirection: string;
-  coordinates: {
-    x: number;
-    y: number;
-  };
+  coordinates: { x: number; y: number };
   confidence: number;
-  fingerStraightness: {
-    thumb: number;
-    index: number;
-    middle: number;
-    ring: number;
-    pinky: number;
-  };
-  activeFingers: {
-    thumb: boolean;
-    index: boolean;
-    middle: boolean;
-    ring: boolean;
-    pinky: boolean;
-  };
+  fingerStraightness: { thumb: number; index: number; middle: number; ring: number; pinky: number };
+  extendedFingers: { thumb: boolean; index: boolean; middle: boolean; ring: boolean; pinky: boolean };
 }
 
 interface HandsState {
@@ -41,17 +27,24 @@ interface HandsState {
 interface GestureState {
   activationFrames: number;
   deactivationFrames: number;
-  isControlActive: boolean;
+  isGestureControlActive: boolean;
   brightnessControlFrames: number;
   isBrightnessControl: boolean;
   initialY: number | null;
   initialX: number | null;
+  // Add PID controller state
+  pidState: {
+    lastError: number;
+    integral: number;
+    lastTime: number;
+    lastValue: number;
+  };
 }
 
 const INITIAL_HAND_INFO: HandInfo = {
   isOpen: false,
   openConfidence: 0,
-  pointingDirection: 'none',
+  pointingDirection: "none",
   coordinates: { x: 0, y: 0 },
   confidence: 0,
   fingerStraightness: {
@@ -61,7 +54,7 @@ const INITIAL_HAND_INFO: HandInfo = {
     ring: 0,
     pinky: 0
   },
-  activeFingers: {
+  extendedFingers: {
     thumb: false,
     index: false,
     middle: false,
@@ -78,24 +71,53 @@ const INITIAL_HANDS_STATE: HandsState = {
 const INITIAL_GESTURE_STATE: GestureState = {
   activationFrames: 0,
   deactivationFrames: 0,
-  isControlActive: false,
+  isGestureControlActive: false,
   brightnessControlFrames: 0,
   isBrightnessControl: false,
   initialY: null,
-  initialX: null
+  initialX: null,
+  // Add PID controller state
+  pidState: {
+    lastError: 0,
+    integral: 0,
+    lastTime: 0,
+    lastValue: 0
+  }
 };
 
 const FRAMES_TO_ACTIVATE = 10;
 const FRAMES_TO_DEACTIVATE = 15;
 const FRAMES_TO_BRIGHTNESS = 10;
 
+// PID controller constants
+const PID_CONSTANTS = {
+  Kp: 0.02,  // Much higher for faster response
+  Ki: 0.001,  // Higher for better steady-state accuracy
+  Kd: 0.02   // Higher for better damping
+};
+
+// Helper function to snap to nearest multiple of 5
+const snapToMultipleOf5 = (value: number): number => {
+  return Math.round(value / 5) * 5;
+};
+
 const HandTracking: React.FC<HandTrackingProps> = () => {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [handsInfo, setHandsInfo] = useState<HandsState>(INITIAL_HANDS_STATE);
   const [gestureState, setGestureState] = useState<GestureState>(INITIAL_GESTURE_STATE);
-  // Add ref to track current gesture state
   const currentGestureState = useRef<GestureState>(INITIAL_GESTURE_STATE);
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const { setBrightness } = useBrightness();
+
+  // Add delay before starting camera
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsCameraReady(true);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   // Update ref whenever state changes
   useEffect(() => {
@@ -277,29 +299,12 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
 
     // Determine active fingers: all five for display, but only thumb/index for pointer
     const STRAIGHTNESS_THRESHOLD = 0.6;
-    const rawStates = {
+    const extendedFingers = {
+      thumb: fingerStraightness.thumb > STRAIGHTNESS_THRESHOLD,
       index: fingerStraightness.index > STRAIGHTNESS_THRESHOLD,
       middle: fingerStraightness.middle > STRAIGHTNESS_THRESHOLD,
       ring: fingerStraightness.ring > STRAIGHTNESS_THRESHOLD,
       pinky: fingerStraightness.pinky > STRAIGHTNESS_THRESHOLD,
-      thumb: fingerStraightness.thumb > STRAIGHTNESS_THRESHOLD,
-    };
-    // Pointer logic: only thumb or index, pick the straighter if both qualify
-    let thumbActive = false;
-    let indexActive = false;
-    if (rawStates.thumb && rawStates.index) {
-      if (fingerStraightness.thumb > fingerStraightness.index) thumbActive = true;
-      else indexActive = true;
-    } else {
-      thumbActive = rawStates.thumb;
-      indexActive = rawStates.index;
-    }
-    const activeFingers = {
-      thumb: thumbActive,
-      index: indexActive,
-      middle: rawStates.middle,
-      ring: rawStates.ring,
-      pinky: rawStates.pinky,
     };
 
     const handInfo: HandInfo = {
@@ -312,13 +317,15 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
       },
       confidence: handedness.score,
       fingerStraightness,
-      activeFingers
+      extendedFingers
     };
 
     return handInfo;
   }, [calculateFingerExtension, calculateFingerStraightness]);
 
   useEffect(() => {
+    if (!isCameraReady) return;
+
     const hands = new Hands({
       locateFile: (file) => {
         return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
@@ -456,56 +463,138 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
           // Removing this will break gesture detection visualization
           // If you're thinking about removing this, STOP! DON'T DO IT!
           // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-          if (handInfo.activeFingers.thumb) {
-            // SACRED: Thumb tracking visualization - DO NOT REMOVE
-            const thumbLandmarks = [1, 2, 3, 4];
-            const thumbConnections = [[1, 2], [2, 3], [3, 4]];
-            ctx.strokeStyle = 'blue';
-            ctx.lineWidth = 5;
-            thumbConnections.forEach(([start, end]) => {
-              ctx.beginPath();
-              ctx.moveTo(mirroredLandmarks[start].x * w, mirroredLandmarks[start].y * h);
-              ctx.lineTo(mirroredLandmarks[end].x * w, mirroredLandmarks[end].y * h);
-              ctx.stroke();
-            });
-            ctx.fillStyle = 'blue';
-            ctx.strokeStyle = 'blue';
-            ctx.lineWidth = 2;
-            thumbLandmarks.forEach(i => {
-              const { x, y } = mirroredLandmarks[i];
-              const px = x * w;
-              const py = y * h;
-              ctx.beginPath();
-              ctx.arc(px, py, 5, 0, 2 * Math.PI);
-              ctx.fill();
-              ctx.stroke();
-            });
-          }
-          if (handInfo.activeFingers.index) {
-            // SACRED: Index finger tracking visualization - DO NOT REMOVE
-            const indexLandmarks = [5, 6, 7, 8];
-            const indexConnections = [[5, 6], [6, 7], [7, 8]];
-            ctx.strokeStyle = 'blue';
-            ctx.lineWidth = 5;
-            indexConnections.forEach(([start, end]) => {
-              ctx.beginPath();
-              ctx.moveTo(mirroredLandmarks[start].x * w, mirroredLandmarks[start].y * h);
-              ctx.lineTo(mirroredLandmarks[end].x * w, mirroredLandmarks[end].y * h);
-              ctx.stroke();
-            });
-            ctx.fillStyle = 'blue';
-            ctx.strokeStyle = 'blue';
-            ctx.lineWidth = 2;
-            indexLandmarks.forEach(i => {
-              const { x, y } = mirroredLandmarks[i];
-              const px = x * w;
-              const py = y * h;
-              ctx.beginPath();
-              ctx.arc(px, py, 5, 0, 2 * Math.PI);
-              ctx.fill();
-              ctx.stroke();
-            });
-          }
+          // Helper function to get finger color based on hand and active state
+          const getFingerColor = (isActive: boolean, isIndex: boolean = false) => {
+            if (isIndex) return isActive ? '#0000FF' : (isUserRight ? '#FF0000' : '#00FF00');
+            return isActive 
+              ? (isUserRight ? '#00FF00' : '#FF0000')
+              : (isUserRight ? '#FF0000' : '#00FF00');
+          };
+
+          // Thumb
+          const thumbLandmarks = [1, 2, 3, 4];
+          const thumbConnections = [[1, 2], [2, 3], [3, 4]];
+          const thumbColor = getFingerColor(handInfo.extendedFingers.thumb);
+          ctx.strokeStyle = thumbColor;
+          ctx.lineWidth = 5;
+          thumbConnections.forEach(([start, end]) => {
+            ctx.beginPath();
+            ctx.moveTo(mirroredLandmarks[start].x * w, mirroredLandmarks[start].y * h);
+            ctx.lineTo(mirroredLandmarks[end].x * w, mirroredLandmarks[end].y * h);
+            ctx.stroke();
+          });
+          ctx.fillStyle = thumbColor;
+          ctx.strokeStyle = thumbColor;
+          ctx.lineWidth = 2;
+          thumbLandmarks.forEach(i => {
+            const { x, y } = mirroredLandmarks[i];
+            const px = x * w;
+            const py = y * h;
+            ctx.beginPath();
+            ctx.arc(px, py, 5, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+          });
+
+          // Index Finger
+          const indexLandmarks = [5, 6, 7, 8];
+          const indexConnections = [[5, 6], [6, 7], [7, 8]];
+          const indexColor = getFingerColor(handInfo.extendedFingers.index, true);
+          ctx.strokeStyle = indexColor;
+          ctx.lineWidth = 5;
+          indexConnections.forEach(([start, end]) => {
+            ctx.beginPath();
+            ctx.moveTo(mirroredLandmarks[start].x * w, mirroredLandmarks[start].y * h);
+            ctx.lineTo(mirroredLandmarks[end].x * w, mirroredLandmarks[end].y * h);
+            ctx.stroke();
+          });
+          ctx.fillStyle = indexColor;
+          ctx.strokeStyle = indexColor;
+          ctx.lineWidth = 2;
+          indexLandmarks.forEach(i => {
+            const { x, y } = mirroredLandmarks[i];
+            const px = x * w;
+            const py = y * h;
+            ctx.beginPath();
+            ctx.arc(px, py, 5, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+          });
+
+          // Middle Finger
+          const middleLandmarks = [9, 10, 11, 12];
+          const middleConnections = [[9, 10], [10, 11], [11, 12]];
+          const middleColor = getFingerColor(handInfo.extendedFingers.middle);
+          ctx.strokeStyle = middleColor;
+          ctx.lineWidth = 5;
+          middleConnections.forEach(([start, end]) => {
+            ctx.beginPath();
+            ctx.moveTo(mirroredLandmarks[start].x * w, mirroredLandmarks[start].y * h);
+            ctx.lineTo(mirroredLandmarks[end].x * w, mirroredLandmarks[end].y * h);
+            ctx.stroke();
+          });
+          ctx.fillStyle = middleColor;
+          ctx.strokeStyle = middleColor;
+          ctx.lineWidth = 2;
+          middleLandmarks.forEach(i => {
+            const { x, y } = mirroredLandmarks[i];
+            const px = x * w;
+            const py = y * h;
+            ctx.beginPath();
+            ctx.arc(px, py, 5, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+          });
+
+          // Ring Finger
+          const ringLandmarks = [13, 14, 15, 16];
+          const ringConnections = [[13, 14], [14, 15], [15, 16]];
+          const ringColor = getFingerColor(handInfo.extendedFingers.ring);
+          ctx.strokeStyle = ringColor;
+          ctx.lineWidth = 5;
+          ringConnections.forEach(([start, end]) => {
+            ctx.beginPath();
+            ctx.moveTo(mirroredLandmarks[start].x * w, mirroredLandmarks[start].y * h);
+            ctx.lineTo(mirroredLandmarks[end].x * w, mirroredLandmarks[end].y * h);
+            ctx.stroke();
+          });
+          ctx.fillStyle = ringColor;
+          ctx.strokeStyle = ringColor;
+          ctx.lineWidth = 2;
+          ringLandmarks.forEach(i => {
+            const { x, y } = mirroredLandmarks[i];
+            const px = x * w;
+            const py = y * h;
+            ctx.beginPath();
+            ctx.arc(px, py, 5, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+          });
+
+          // Pinky Finger
+          const pinkyLandmarks = [17, 18, 19, 20];
+          const pinkyConnections = [[17, 18], [18, 19], [19, 20]];
+          const pinkyColor = getFingerColor(handInfo.extendedFingers.pinky);
+          ctx.strokeStyle = pinkyColor;
+          ctx.lineWidth = 5;
+          pinkyConnections.forEach(([start, end]) => {
+            ctx.beginPath();
+            ctx.moveTo(mirroredLandmarks[start].x * w, mirroredLandmarks[start].y * h);
+            ctx.lineTo(mirroredLandmarks[end].x * w, mirroredLandmarks[end].y * h);
+            ctx.stroke();
+          });
+          ctx.fillStyle = pinkyColor;
+          ctx.strokeStyle = pinkyColor;
+          ctx.lineWidth = 2;
+          pinkyLandmarks.forEach(i => {
+            const { x, y } = mirroredLandmarks[i];
+            const px = x * w;
+            const py = y * h;
+            ctx.beginPath();
+            ctx.arc(px, py, 5, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+          });
 
           // Additional visualizations can be added HERE, AFTER the sacred hand rendering code
           // Any new visualization features should be added below this line
@@ -528,92 +617,141 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
                   const x = indexTip.x * displayWidth;
                   const y = indexTip.y * displayHeight;
 
-                  // Save context state
-                  ctx.save();
-
-                  // Calculate line start and end points to make control point at 43% from bottom
-                  const lineLength = displayHeight * 0.8; // Use 80% of display height
+                  // Calculate line start and end points
+                  const lineLength = displayHeight * 0.5;
                   const bottomOffset = (displayHeight - lineLength) / 2;
                   const lineStart = bottomOffset;
                   const lineEnd = bottomOffset + lineLength;
                   
+                  // Clamp the y position to stay within the line bounds
+                  const clampedY = Math.max(lineStart, Math.min(lineEnd, y));
+
+                  // Calculate normalized target value (0-1)
+                  const controlRange = lineEnd - lineStart;
+                  const controlPosition = clampedY - lineStart;
+                  const rawValue = 1 - (controlPosition / controlRange);
+                  const targetValue = snapToMultipleOf5(rawValue * 100) / 100; // Convert to 0-1 after snapping
+                  
+                  // Get current time for state updates
+                  const currentTime = Date.now();
+                  
+                  // Bypass PID for now - just use the target value directly
+                  const outputValue = targetValue;
+                  
+                  // Update PID state (keeping it for future use)
+                  setGestureState(prevState => ({
+                    ...prevState,
+                    pidState: {
+                      lastError: 0,
+                      integral: 0,
+                      lastTime: currentTime,
+                      lastValue: outputValue
+                    }
+                  }));
+                  
+                  // Convert to percentage for display and logging
+                  const targetPercentage = Math.round(targetValue * 100);
+                  const actualPercentage = Math.round(outputValue * 100);
+                  
+                  // Update the brightness context
+                  setBrightness(actualPercentage);
+                  
+                  // Log the brightness percentage
+                  console.log(`Brightness: ${actualPercentage}%`);
+                  
+                  // Calculate positions for both target and actual values
+                  const targetY = lineStart + (1 - targetValue) * controlRange;
+                  const actualY = lineStart + (1 - outputValue) * controlRange;
+                  
                   // Draw vertical guide line with caps
                   ctx.beginPath();
-                  ctx.strokeStyle = '#9933FF'; // Bright purple
-                  ctx.lineWidth = 12; // Thicker line
+                  ctx.strokeStyle = '#9933FF';
+                  ctx.lineWidth = 12;
                   ctx.lineCap = 'round';
                   ctx.moveTo(x, lineStart);
                   ctx.lineTo(x, lineEnd);
                   ctx.stroke();
 
-                  // Draw line caps (circles at ends)
-                  const capRadius = 12; // Bigger caps
-                  ctx.fillStyle = '#9933FF'; // Match line color
+                  // Draw line caps
+                  const capRadius = 12;
+                  ctx.fillStyle = '#9933FF';
                   
-                  // Top cap
                   ctx.beginPath();
                   ctx.arc(x, lineStart, capRadius, 0, 2 * Math.PI);
                   ctx.fill();
                   
-                  // Bottom cap
                   ctx.beginPath();
                   ctx.arc(x, lineEnd, capRadius, 0, 2 * Math.PI);
                   ctx.fill();
 
-                  // Calculate and display percentage
-                  const controlRange = lineEnd - lineStart;
-                  const controlPosition = y - lineStart;
-                  const percentage = Math.round((1 - (controlPosition / controlRange)) * 100);
-                  const clampedPercentage = Math.max(0, Math.min(100, percentage));
-                  
-                  // Check pointing direction for text position
-                  const isPointingLeft = handInfo.pointingDirection.includes('left');
-                  const isPointingRight = handInfo.pointingDirection.includes('right');
-                  
-                  // Display percentage
+                  // Draw target indicator (where hand is pointing)
+                  ctx.beginPath();
+                  ctx.arc(x, targetY, 8, 0, 2 * Math.PI);
+                  ctx.fillStyle = '#FF0000'; // Red for target
+                  ctx.fill();
+                  ctx.strokeStyle = '#FFFFFF';
+                  ctx.lineWidth = 2;
+                  ctx.stroke();
+
+                  // Draw actual value indicator (PID smoothed)
+                  ctx.beginPath();
+                  ctx.arc(x, actualY, 12, 0, 2 * Math.PI);
+                  ctx.fillStyle = '#00FF00'; // Green for actual
+                  ctx.fill();
+                  ctx.strokeStyle = '#FFFFFF';
+                  ctx.lineWidth = 2;
+                  ctx.stroke();
+
+                  // Draw connecting line between target and actual
+                  ctx.beginPath();
+                  ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                  ctx.lineWidth = 2;
+                  ctx.moveTo(x, targetY);
+                  ctx.lineTo(x, actualY);
+                  ctx.stroke();
+
+                  // Display percentages
                   ctx.font = 'bold 52px Arial';
                   ctx.fillStyle = '#FFFFFF';
                   ctx.strokeStyle = '#000000';
                   ctx.lineWidth = 4;
                   
+                  const isPointingLeft = handInfo.pointingDirection.includes('left');
+                  const isPointingRight = handInfo.pointingDirection.includes('right');
+                  
                   ctx.textAlign = isPointingLeft ? 'left' : isPointingRight ? 'right' : 'center';
                   ctx.textBaseline = 'middle';
                   const textOffset = isPointingLeft ? 150 : isPointingRight ? -150 : 0;
                   
-                  ctx.strokeText(`${clampedPercentage}%`, x - textOffset, y);
-                  ctx.fillText(`${clampedPercentage}%`, x - textOffset, y);
+                  // Draw target percentage
+                  ctx.fillStyle = '#FF0000';
+                  ctx.strokeText(`${targetPercentage}%`, x - textOffset, targetY);
+                  ctx.fillText(`${targetPercentage}%`, x - textOffset, targetY);
+                  
+                  // Draw actual percentage
+                  ctx.fillStyle = '#00FF00';
+                  ctx.strokeText(`${actualPercentage}%`, x - textOffset, actualY);
+                  ctx.fillText(`${actualPercentage}%`, x - textOffset, actualY);
 
-                  // Draw outer glow
-                  const gradient = ctx.createRadialGradient(x, y, 12, x, y, 24); // Bigger glow
-                  gradient.addColorStop(0, 'rgba(153, 51, 255, 0.3)');
-                  gradient.addColorStop(1, 'rgba(153, 51, 255, 0)');
+                  // Draw outer glow for actual value
+                  const gradient = ctx.createRadialGradient(x, actualY, 12, x, actualY, 24);
+                  gradient.addColorStop(0, 'rgba(0, 255, 0, 0.3)');
+                  gradient.addColorStop(1, 'rgba(0, 255, 0, 0)');
                   ctx.beginPath();
-                  ctx.arc(x, y, 24, 0, 2 * Math.PI);
+                  ctx.arc(x, actualY, 24, 0, 2 * Math.PI);
                   ctx.fillStyle = gradient;
                   ctx.fill();
 
-                  // Draw control point
-                  ctx.beginPath();
-                  ctx.arc(x, y, 12, 0, 2 * Math.PI); // Bigger control point
-                  ctx.fillStyle = '#9933FF';
-                  ctx.fill();
-                  ctx.strokeStyle = '#FFFFFF';
-                  ctx.lineWidth = 2;
-                  ctx.stroke();
-
-                  // Draw crosshair
-                  const crosshairSize = 6; // Bigger crosshair
+                  // Draw crosshair for actual value
+                  const crosshairSize = 6;
                   ctx.beginPath();
                   ctx.strokeStyle = '#FFFFFF';
                   ctx.lineWidth = 2;
-                  ctx.moveTo(x - crosshairSize, y);
-                  ctx.lineTo(x + crosshairSize, y);
-                  ctx.moveTo(x, y - crosshairSize);
-                  ctx.lineTo(x, y + crosshairSize);
+                  ctx.moveTo(x - crosshairSize, actualY);
+                  ctx.lineTo(x + crosshairSize, actualY);
+                  ctx.moveTo(x, actualY - crosshairSize);
+                  ctx.lineTo(x, actualY + crosshairSize);
                   ctx.stroke();
-
-                  // Restore context state
-                  ctx.restore();
                 }
               }
             }
@@ -627,12 +765,11 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
               !results.multiHandLandmarks || 
               results.multiHandLandmarks.length === 0 ||
               // Or if we have hands but in control mode with invalid gestures
-              (prevState.isControlActive && (
+              (prevState.isGestureControlActive && (
                 // Check for invalid fingers or all fingers down
-                newHandsInfo.right.activeFingers.middle || 
-                newHandsInfo.right.activeFingers.ring ||
-                newHandsInfo.right.activeFingers.thumb ||
-                !Object.values(newHandsInfo.right.activeFingers).some(active => active)
+                newHandsInfo.right.extendedFingers.middle || 
+                newHandsInfo.right.extendedFingers.ring ||
+                !newHandsInfo.right.extendedFingers.index
               ))
             );
 
@@ -655,16 +792,15 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
             const rightHand = newHandsInfo.right;
             
             // Check for activation gesture (index + pinky)
-            const isActivationGesture = rightHand.activeFingers.index && 
-                                      rightHand.activeFingers.pinky &&
-                                      !rightHand.activeFingers.middle && 
-                                      !rightHand.activeFingers.ring &&
-                                      !rightHand.activeFingers.thumb;
+            const isActivationGesture = rightHand.extendedFingers.index && 
+                                      rightHand.extendedFingers.pinky &&
+                                      !rightHand.extendedFingers.middle && 
+                                      !rightHand.extendedFingers.ring;
 
             // If already in control mode, continue with brightness control logic
-            if (prevState.isControlActive) {
+            if (prevState.isGestureControlActive) {
               // Check for brightness control mode
-              const isPinkyDown = !rightHand.activeFingers.pinky && rightHand.activeFingers.index;
+              const isPinkyDown = !rightHand.extendedFingers.pinky && rightHand.extendedFingers.index;
               const isPointingHorizontal = rightHand.pointingDirection.includes('left') || 
                                          rightHand.pointingDirection.includes('right');
               const isPointingVertical = rightHand.pointingDirection === 'up' || 
@@ -739,7 +875,7 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
               const newState = {
                 ...INITIAL_GESTURE_STATE,
                 activationFrames: newFrames,
-                isControlActive: true
+                isGestureControlActive: true
               };
               currentGestureState.current = newState;
               return newState;
@@ -748,7 +884,7 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
             const newState = {
               ...INITIAL_GESTURE_STATE,
               activationFrames: newFrames,
-              isControlActive: false
+              isGestureControlActive: false
             };
             currentGestureState.current = newState;
             return newState;
@@ -779,26 +915,28 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
       
       camera.start().catch(() => {});
     }
-  }, [analyzeHand]);
+  }, [analyzeHand, isCameraReady]);
 
   return (
     <div className="hand-tracking-container">
       <div className="video-container">
-        <Webcam
-          ref={webcamRef}
-          mirrored={true}
-          videoConstraints={{
-            width: 1920,
-            height: 1080,
-            aspectRatio: 16/9,
-            facingMode: "user"
-          }}
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain'
-          }}
-        />
+        {isCameraReady && (
+          <Webcam
+            ref={webcamRef}
+            mirrored={true}
+            videoConstraints={{
+              width: 1920,
+              height: 1080,
+              aspectRatio: 16/9,
+              facingMode: "user"
+            }}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain'
+            }}
+          />
+        )}
         <canvas
           ref={canvasRef}
           style={{
@@ -812,7 +950,7 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
         handsInfo={handsInfo} 
         controlState={{
           activationFrames: gestureState.activationFrames,
-          isControlActive: gestureState.isControlActive,
+          isGestureControlActive: gestureState.isGestureControlActive,
           brightnessControlFrames: gestureState.brightnessControlFrames,
           isBrightnessControl: gestureState.isBrightnessControl
         }}
