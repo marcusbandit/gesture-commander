@@ -45,6 +45,7 @@ interface GestureState {
   brightnessControlFrames: number;
   isBrightnessControl: boolean;
   initialY: number | null;
+  initialX: number | null;
 }
 
 const INITIAL_HAND_INFO: HandInfo = {
@@ -80,7 +81,8 @@ const INITIAL_GESTURE_STATE: GestureState = {
   isControlActive: false,
   brightnessControlFrames: 0,
   isBrightnessControl: false,
-  initialY: null
+  initialY: null,
+  initialX: null
 };
 
 const FRAMES_TO_ACTIVATE = 10;
@@ -519,7 +521,7 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
                   const displayHeight = video.videoHeight;
                   
                   const indexTip = {
-                    x: 1 - landmarks[8].x, // Mirror the x coordinate
+                    x: currentGestureState.current.initialX!,
                     y: landmarks[8].y
                   };
 
@@ -529,39 +531,81 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
                   // Save context state
                   ctx.save();
 
-                  // Draw vertical guide line
+                  // Calculate line start and end points to make control point at 43% from bottom
+                  const lineLength = displayHeight * 0.8; // Use 80% of display height
+                  const bottomOffset = (displayHeight - lineLength) / 2;
+                  const lineStart = bottomOffset;
+                  const lineEnd = bottomOffset + lineLength;
+                  
+                  // Draw vertical guide line with caps
                   ctx.beginPath();
-                  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-                  ctx.lineWidth = 2;
-                  ctx.setLineDash([5, 5]); // Make it dashed
-                  ctx.moveTo(x, 0);
-                  ctx.lineTo(x, displayHeight);
+                  ctx.strokeStyle = '#9933FF'; // Bright purple
+                  ctx.lineWidth = 12; // Thicker line
+                  ctx.lineCap = 'round';
+                  ctx.moveTo(x, lineStart);
+                  ctx.lineTo(x, lineEnd);
                   ctx.stroke();
-                  ctx.setLineDash([]); // Reset line style
+
+                  // Draw line caps (circles at ends)
+                  const capRadius = 12; // Bigger caps
+                  ctx.fillStyle = '#9933FF'; // Match line color
+                  
+                  // Top cap
+                  ctx.beginPath();
+                  ctx.arc(x, lineStart, capRadius, 0, 2 * Math.PI);
+                  ctx.fill();
+                  
+                  // Bottom cap
+                  ctx.beginPath();
+                  ctx.arc(x, lineEnd, capRadius, 0, 2 * Math.PI);
+                  ctx.fill();
+
+                  // Calculate and display percentage
+                  const controlRange = lineEnd - lineStart;
+                  const controlPosition = y - lineStart;
+                  const percentage = Math.round((1 - (controlPosition / controlRange)) * 100);
+                  const clampedPercentage = Math.max(0, Math.min(100, percentage));
+                  
+                  // Check pointing direction for text position
+                  const isPointingLeft = handInfo.pointingDirection.includes('left');
+                  const isPointingRight = handInfo.pointingDirection.includes('right');
+                  
+                  // Display percentage
+                  ctx.font = 'bold 52px Arial';
+                  ctx.fillStyle = '#FFFFFF';
+                  ctx.strokeStyle = '#000000';
+                  ctx.lineWidth = 4;
+                  
+                  ctx.textAlign = isPointingLeft ? 'left' : isPointingRight ? 'right' : 'center';
+                  ctx.textBaseline = 'middle';
+                  const textOffset = isPointingLeft ? 150 : isPointingRight ? -150 : 0;
+                  
+                  ctx.strokeText(`${clampedPercentage}%`, x - textOffset, y);
+                  ctx.fillText(`${clampedPercentage}%`, x - textOffset, y);
 
                   // Draw outer glow
-                  const gradient = ctx.createRadialGradient(x, y, 8, x, y, 16);
-                  gradient.addColorStop(0, 'rgba(76, 175, 80, 0.3)');
-                  gradient.addColorStop(1, 'rgba(76, 175, 80, 0)');
+                  const gradient = ctx.createRadialGradient(x, y, 12, x, y, 24); // Bigger glow
+                  gradient.addColorStop(0, 'rgba(153, 51, 255, 0.3)');
+                  gradient.addColorStop(1, 'rgba(153, 51, 255, 0)');
                   ctx.beginPath();
-                  ctx.arc(x, y, 16, 0, 2 * Math.PI);
+                  ctx.arc(x, y, 24, 0, 2 * Math.PI);
                   ctx.fillStyle = gradient;
                   ctx.fill();
 
                   // Draw control point
                   ctx.beginPath();
-                  ctx.arc(x, y, 8, 0, 2 * Math.PI);
-                  ctx.fillStyle = '#4CAF50';
+                  ctx.arc(x, y, 12, 0, 2 * Math.PI); // Bigger control point
+                  ctx.fillStyle = '#9933FF';
                   ctx.fill();
                   ctx.strokeStyle = '#FFFFFF';
                   ctx.lineWidth = 2;
                   ctx.stroke();
 
                   // Draw crosshair
-                  const crosshairSize = 4;
+                  const crosshairSize = 6; // Bigger crosshair
                   ctx.beginPath();
                   ctx.strokeStyle = '#FFFFFF';
-                  ctx.lineWidth = 1;
+                  ctx.lineWidth = 2;
                   ctx.moveTo(x - crosshairSize, y);
                   ctx.lineTo(x + crosshairSize, y);
                   ctx.moveTo(x, y - crosshairSize);
@@ -577,6 +621,37 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
 
           // Process gesture state
           setGestureState(prevState => {
+            // Check for deactivation conditions
+            const shouldDeactivate = (
+              // No hands detected
+              !results.multiHandLandmarks || 
+              results.multiHandLandmarks.length === 0 ||
+              // Or if we have hands but in control mode with invalid gestures
+              (prevState.isControlActive && (
+                // Check for invalid fingers or all fingers down
+                newHandsInfo.right.activeFingers.middle || 
+                newHandsInfo.right.activeFingers.ring ||
+                newHandsInfo.right.activeFingers.thumb ||
+                !Object.values(newHandsInfo.right.activeFingers).some(active => active)
+              ))
+            );
+
+            // If should deactivate, increment counter
+            if (shouldDeactivate) {
+              const newDeactivationFrames = prevState.deactivationFrames + 1;
+              if (newDeactivationFrames >= FRAMES_TO_DEACTIVATE) {
+                const newState = { ...INITIAL_GESTURE_STATE };
+                currentGestureState.current = newState;
+                return newState;
+              }
+              return {
+                ...prevState,
+                deactivationFrames: newDeactivationFrames
+              };
+            }
+
+            // If we get here, no deactivation conditions are met
+            // Reset deactivation counter and continue with normal logic
             const rightHand = newHandsInfo.right;
             
             // Check for activation gesture (index + pinky)
@@ -586,17 +661,8 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
                                       !rightHand.activeFingers.ring &&
                                       !rightHand.activeFingers.thumb;
 
-            // If already in control mode, check for deactivation (both index and pinky down)
+            // If already in control mode, continue with brightness control logic
             if (prevState.isControlActive) {
-              const isDeactivationGesture = !rightHand.activeFingers.index && 
-                                          !rightHand.activeFingers.pinky;
-
-              if (isDeactivationGesture) {
-                const newState = { ...INITIAL_GESTURE_STATE };
-                currentGestureState.current = newState;
-                return newState;
-              }
-
               // Check for brightness control mode
               const isPinkyDown = !rightHand.activeFingers.pinky && rightHand.activeFingers.index;
               const isPointingHorizontal = rightHand.pointingDirection.includes('left') || 
@@ -627,6 +693,7 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
                       brightnessControlFrames: newBrightnessFrames,
                       isBrightnessControl: true,
                       initialY: rightHand.coordinates.y,
+                      initialX: rightHand.coordinates.x,
                       deactivationFrames: 0
                     };
                     currentGestureState.current = newState;
@@ -748,6 +815,10 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
           isControlActive: gestureState.isControlActive,
           brightnessControlFrames: gestureState.brightnessControlFrames,
           isBrightnessControl: gestureState.isBrightnessControl
+        }}
+        onCooldownComplete={() => {
+          setGestureState(INITIAL_GESTURE_STATE);
+          currentGestureState.current = INITIAL_GESTURE_STATE;
         }}
       />
     </div>
