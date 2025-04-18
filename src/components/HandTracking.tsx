@@ -361,60 +361,28 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
           left: { ...INITIAL_HAND_INFO },
           right: { ...INITIAL_HAND_INFO }
         };
-
-        // Process hands and track which hands we've seen
+        // Ensure only one hand per classification label (left/right)
         const seenLabels: Record<string, boolean> = {};
         
-        // First, find and process the right hand (appears as 'Left' in landmarks due to mirroring)
-        const rightHandIndex = results.multiHandedness.findIndex(h => h.label.toLowerCase() === 'left');
-        if (rightHandIndex !== -1) {
-          const landmarks = results.multiHandLandmarks[rightHandIndex];
-          const handedness = results.multiHandedness[rightHandIndex];
-          
-          // Mirror the landmarks for the right hand
-          const mirroredLandmarks = landmarks.map(landmark => ({
-            ...landmark,
-            x: 1 - landmark.x
-          }));
-          
-          const handInfo = analyzeHand(mirroredLandmarks, handedness);
-          newHandsInfo.right = handInfo;
-          seenLabels['left'] = true;
-          
-          console.log('User Right Hand pointing:', handInfo.pointingDirection);
-        }
-        
-        // Then find and process the left hand (appears as 'Right' in landmarks due to mirroring)
-        const leftHandIndex = results.multiHandedness.findIndex(h => h.label.toLowerCase() === 'right');
-        if (leftHandIndex !== -1) {
-          const landmarks = results.multiHandLandmarks[leftHandIndex];
-          const handedness = results.multiHandedness[leftHandIndex];
-          
-          // Mirror the landmarks for the left hand
-          const mirroredLandmarks = landmarks.map(landmark => ({
-            ...landmark,
-            x: 1 - landmark.x
-          }));
-          
-          const handInfo = analyzeHand(mirroredLandmarks, handedness);
-          newHandsInfo.left = handInfo;
-          seenLabels['right'] = true;
-          
-          console.log('User Left Hand pointing:', handInfo.pointingDirection);
-        }
-
-        // Now draw the hands with their correct styling
         results.multiHandLandmarks.forEach((landmarks, index) => {
           const handedness = results.multiHandedness[index];
-          const isUserRight = handedness.label.toLowerCase() === 'left'; // 'Left' in video means user's right hand
+          // Skip duplicate labels to allow only one left and one right hand
+          const label = handedness.label.toLowerCase();
+          if (seenLabels[label]) return;
+          seenLabels[label] = true;
           
-          // Mirror the landmarks for drawing
+          // Mirror the landmarks
           const mirroredLandmarks = landmarks.map(landmark => ({
             ...landmark,
-            x: 1 - landmark.x
+            x: 1 - landmark.x // Mirror the x coordinate
           }));
           
+          const handInfo = analyzeHand(mirroredLandmarks, handedness);
+          
           // Draw overlays styled for user right/left hand
+          const isUserRight = handedness.label.toLowerCase() === 'left';
+          const w = ctx.canvas.width;
+          const h = ctx.canvas.height;
           if (isUserRight) {
             // User's right hand: red lines, green control dots with red outline
             drawConnectors(ctx, mirroredLandmarks, HAND_CONNECTIONS, { color: '#FF0000', lineWidth: 5 });
@@ -422,65 +390,13 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
             ctx.strokeStyle = '#FF0000';
             ctx.lineWidth = 2;
             mirroredLandmarks.forEach(({ x, y }) => {
-              const px = x * displayWidth;
-              const py = y * displayHeight;
+              const px = x * w;
+              const py = y * h;
               ctx.beginPath();
               ctx.arc(px, py, 5, 0, 2 * Math.PI);
               ctx.fill();
               ctx.stroke();
             });
-
-            // Draw active fingers for right hand
-            if (newHandsInfo.right.activeFingers.thumb) {
-              // SACRED: Thumb tracking visualization - DO NOT REMOVE
-              const thumbLandmarks = [1, 2, 3, 4];
-              const thumbConnections = [[1, 2], [2, 3], [3, 4]];
-              ctx.strokeStyle = 'blue';
-              ctx.lineWidth = 5;
-              thumbConnections.forEach(([start, end]) => {
-                ctx.beginPath();
-                ctx.moveTo(mirroredLandmarks[start].x * displayWidth, mirroredLandmarks[start].y * displayHeight);
-                ctx.lineTo(mirroredLandmarks[end].x * displayWidth, mirroredLandmarks[end].y * displayHeight);
-                ctx.stroke();
-              });
-              ctx.fillStyle = 'blue';
-              ctx.strokeStyle = 'blue';
-              ctx.lineWidth = 2;
-              thumbLandmarks.forEach(i => {
-                const { x, y } = mirroredLandmarks[i];
-                const px = x * displayWidth;
-                const py = y * displayHeight;
-                ctx.beginPath();
-                ctx.arc(px, py, 5, 0, 2 * Math.PI);
-                ctx.fill();
-                ctx.stroke();
-              });
-            }
-            if (newHandsInfo.right.activeFingers.index) {
-              // SACRED: Index finger tracking visualization - DO NOT REMOVE
-              const indexLandmarks = [5, 6, 7, 8];
-              const indexConnections = [[5, 6], [6, 7], [7, 8]];
-              ctx.strokeStyle = 'blue';
-              ctx.lineWidth = 5;
-              indexConnections.forEach(([start, end]) => {
-                ctx.beginPath();
-                ctx.moveTo(mirroredLandmarks[start].x * displayWidth, mirroredLandmarks[start].y * displayHeight);
-                ctx.lineTo(mirroredLandmarks[end].x * displayWidth, mirroredLandmarks[end].y * displayHeight);
-                ctx.stroke();
-              });
-              ctx.fillStyle = 'blue';
-              ctx.strokeStyle = 'blue';
-              ctx.lineWidth = 2;
-              indexLandmarks.forEach(i => {
-                const { x, y } = mirroredLandmarks[i];
-                const px = x * displayWidth;
-                const py = y * displayHeight;
-                ctx.beginPath();
-                ctx.arc(px, py, 5, 0, 2 * Math.PI);
-                ctx.fill();
-                ctx.stroke();
-              });
-            }
           } else {
             // User's left hand: green lines, red control dots with green outline
             drawConnectors(ctx, mirroredLandmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 5 });
@@ -488,65 +404,107 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
             ctx.strokeStyle = '#00FF00';
             ctx.lineWidth = 2;
             mirroredLandmarks.forEach(({ x, y }) => {
-              const px = x * displayWidth;
-              const py = y * displayHeight;
+              const px = x * w;
+              const py = y * h;
               ctx.beginPath();
               ctx.arc(px, py, 5, 0, 2 * Math.PI);
               ctx.fill();
               ctx.stroke();
             });
+          }
 
-            // Draw active fingers for left hand
-            if (newHandsInfo.left.activeFingers.thumb) {
-              // SACRED: Thumb tracking visualization - DO NOT REMOVE
-              const thumbLandmarks = [1, 2, 3, 4];
-              const thumbConnections = [[1, 2], [2, 3], [3, 4]];
-              ctx.strokeStyle = 'blue';
-              ctx.lineWidth = 5;
-              thumbConnections.forEach(([start, end]) => {
-                ctx.beginPath();
-                ctx.moveTo(mirroredLandmarks[start].x * displayWidth, mirroredLandmarks[start].y * displayHeight);
-                ctx.lineTo(mirroredLandmarks[end].x * displayWidth, mirroredLandmarks[end].y * displayHeight);
-                ctx.stroke();
-              });
-              ctx.fillStyle = 'blue';
-              ctx.strokeStyle = 'blue';
-              ctx.lineWidth = 2;
-              thumbLandmarks.forEach(i => {
-                const { x, y } = mirroredLandmarks[i];
-                const px = x * displayWidth;
-                const py = y * displayHeight;
-                ctx.beginPath();
-                ctx.arc(px, py, 5, 0, 2 * Math.PI);
-                ctx.fill();
-                ctx.stroke();
-              });
-            }
-            if (newHandsInfo.left.activeFingers.index) {
-              // SACRED: Index finger tracking visualization - DO NOT REMOVE
-              const indexLandmarks = [5, 6, 7, 8];
-              const indexConnections = [[5, 6], [6, 7], [7, 8]];
-              ctx.strokeStyle = 'blue';
-              ctx.lineWidth = 5;
-              indexConnections.forEach(([start, end]) => {
-                ctx.beginPath();
-                ctx.moveTo(mirroredLandmarks[start].x * displayWidth, mirroredLandmarks[start].y * displayHeight);
-                ctx.lineTo(mirroredLandmarks[end].x * displayWidth, mirroredLandmarks[end].y * displayHeight);
-                ctx.stroke();
-              });
-              ctx.fillStyle = 'blue';
-              ctx.strokeStyle = 'blue';
-              ctx.lineWidth = 2;
-              indexLandmarks.forEach(i => {
-                const { x, y } = mirroredLandmarks[i];
-                const px = x * displayWidth;
-                const py = y * displayHeight;
-                ctx.beginPath();
-                ctx.arc(px, py, 5, 0, 2 * Math.PI);
-                ctx.fill();
-                ctx.stroke();
-              });
-            }
+          // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          // CRITICAL: ABSOLUTELY DO NOT REMOVE OR MODIFY THE CODE BELOW
+          // This is the core hand rendering code that shows the basic hand tracking
+          // Removing this will break the entire hand tracking visualization
+          // If you're thinking about removing this, STOP! DON'T DO IT!
+          // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          if (isUserRight) {
+            // SACRED: Right hand base rendering - DO NOT REMOVE
+            drawConnectors(ctx, mirroredLandmarks, HAND_CONNECTIONS, { color: '#FF0000', lineWidth: 5 });
+            ctx.fillStyle = '#00FF00';
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 2;
+            mirroredLandmarks.forEach(({ x, y }) => {
+              const px = x * w;
+              const py = y * h;
+              ctx.beginPath();
+              ctx.arc(px, py, 5, 0, 2 * Math.PI);
+              ctx.fill();
+              ctx.stroke();
+            });
+          } else {
+            // SACRED: Left hand base rendering - DO NOT REMOVE
+            drawConnectors(ctx, mirroredLandmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 5 });
+            ctx.fillStyle = '#FF0000';
+            ctx.strokeStyle = '#00FF00';
+            ctx.lineWidth = 2;
+            mirroredLandmarks.forEach(({ x, y }) => {
+              const px = x * w;
+              const py = y * h;
+              ctx.beginPath();
+              ctx.arc(px, py, 5, 0, 2 * Math.PI);
+              ctx.fill();
+              ctx.stroke();
+            });
+          }
+
+          // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          // CRITICAL: ABSOLUTELY DO NOT REMOVE OR MODIFY THE CODE BELOW
+          // This section handles active finger highlighting
+          // It shows which fingers are being tracked as "active" for gestures
+          // Removing this will break gesture detection visualization
+          // If you're thinking about removing this, STOP! DON'T DO IT!
+          // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          if (handInfo.activeFingers.thumb) {
+            // SACRED: Thumb tracking visualization - DO NOT REMOVE
+            const thumbLandmarks = [1, 2, 3, 4];
+            const thumbConnections = [[1, 2], [2, 3], [3, 4]];
+            ctx.strokeStyle = 'blue';
+            ctx.lineWidth = 5;
+            thumbConnections.forEach(([start, end]) => {
+              ctx.beginPath();
+              ctx.moveTo(mirroredLandmarks[start].x * w, mirroredLandmarks[start].y * h);
+              ctx.lineTo(mirroredLandmarks[end].x * w, mirroredLandmarks[end].y * h);
+              ctx.stroke();
+            });
+            ctx.fillStyle = 'blue';
+            ctx.strokeStyle = 'blue';
+            ctx.lineWidth = 2;
+            thumbLandmarks.forEach(i => {
+              const { x, y } = mirroredLandmarks[i];
+              const px = x * w;
+              const py = y * h;
+              ctx.beginPath();
+              ctx.arc(px, py, 5, 0, 2 * Math.PI);
+              ctx.fill();
+              ctx.stroke();
+            });
+          }
+          if (handInfo.activeFingers.index) {
+            // SACRED: Index finger tracking visualization - DO NOT REMOVE
+            const indexLandmarks = [5, 6, 7, 8];
+            const indexConnections = [[5, 6], [6, 7], [7, 8]];
+            ctx.strokeStyle = 'blue';
+            ctx.lineWidth = 5;
+            indexConnections.forEach(([start, end]) => {
+              ctx.beginPath();
+              ctx.moveTo(mirroredLandmarks[start].x * w, mirroredLandmarks[start].y * h);
+              ctx.lineTo(mirroredLandmarks[end].x * w, mirroredLandmarks[end].y * h);
+              ctx.stroke();
+            });
+            ctx.fillStyle = 'blue';
+            ctx.strokeStyle = 'blue';
+            ctx.lineWidth = 2;
+            indexLandmarks.forEach(i => {
+              const { x, y } = mirroredLandmarks[i];
+              const px = x * w;
+              const py = y * h;
+              ctx.beginPath();
+              ctx.arc(px, py, 5, 0, 2 * Math.PI);
+              ctx.fill();
+              ctx.stroke();
+            });
           }
 
           // Additional visualizations can be added HERE, AFTER the sacred hand rendering code
@@ -568,8 +526,8 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
                   };
 
                   const x = indexTip.x * displayWidth;
-                  let y = indexTip.y * displayHeight;
-                  
+                  const y = indexTip.y * displayHeight;
+
                   // Save context state
                   ctx.save();
 
@@ -579,16 +537,13 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
                   const lineStart = bottomOffset;
                   const lineEnd = bottomOffset + lineLength;
                   
-                  // Clamp y position to stay within line boundaries
-                  y = Math.max(lineStart, Math.min(lineEnd, y));
-
                   // Draw vertical guide line with caps
                   ctx.beginPath();
                   ctx.strokeStyle = '#9933FF'; // Bright purple
                   ctx.lineWidth = 12; // Thicker line
                   ctx.lineCap = 'round';
-                  ctx.moveTo(indexTip.x * displayWidth, lineStart);
-                  ctx.lineTo(indexTip.x * displayWidth, lineEnd);
+                  ctx.moveTo(x, lineStart);
+                  ctx.lineTo(x, lineEnd);
                   ctx.stroke();
 
                   // Draw line caps (circles at ends)
@@ -597,22 +552,23 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
                   
                   // Top cap
                   ctx.beginPath();
-                  ctx.arc(indexTip.x * displayWidth, lineStart, capRadius, 0, 2 * Math.PI);
+                  ctx.arc(x, lineStart, capRadius, 0, 2 * Math.PI);
                   ctx.fill();
                   
                   // Bottom cap
                   ctx.beginPath();
-                  ctx.arc(indexTip.x * displayWidth, lineEnd, capRadius, 0, 2 * Math.PI);
+                  ctx.arc(x, lineEnd, capRadius, 0, 2 * Math.PI);
                   ctx.fill();
 
                   // Calculate and display percentage
                   const controlRange = lineEnd - lineStart;
                   const controlPosition = y - lineStart;
                   const percentage = Math.round((1 - (controlPosition / controlRange)) * 100);
+                  const clampedPercentage = Math.max(0, Math.min(100, percentage));
                   
-                  // Check pointing direction for text position - using the right hand's info
-                  const isPointingLeft = newHandsInfo.right.pointingDirection.includes('left');
-                  const isPointingRight = newHandsInfo.right.pointingDirection.includes('right');
+                  // Check pointing direction for text position
+                  const isPointingLeft = handInfo.pointingDirection.includes('left');
+                  const isPointingRight = handInfo.pointingDirection.includes('right');
                   
                   // Display percentage
                   ctx.font = 'bold 52px Arial';
@@ -624,21 +580,21 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
                   ctx.textBaseline = 'middle';
                   const textOffset = isPointingLeft ? 150 : isPointingRight ? -150 : 0;
                   
-                  ctx.strokeText(`${percentage}%`, indexTip.x * displayWidth - textOffset, y);
-                  ctx.fillText(`${percentage}%`, indexTip.x * displayWidth - textOffset, y);
+                  ctx.strokeText(`${clampedPercentage}%`, x - textOffset, y);
+                  ctx.fillText(`${clampedPercentage}%`, x - textOffset, y);
 
                   // Draw outer glow
-                  const gradient = ctx.createRadialGradient(indexTip.x * displayWidth, y, 12, indexTip.x * displayWidth, y, 24); // Bigger glow
+                  const gradient = ctx.createRadialGradient(x, y, 12, x, y, 24); // Bigger glow
                   gradient.addColorStop(0, 'rgba(153, 51, 255, 0.3)');
                   gradient.addColorStop(1, 'rgba(153, 51, 255, 0)');
                   ctx.beginPath();
-                  ctx.arc(indexTip.x * displayWidth, y, 24, 0, 2 * Math.PI);
+                  ctx.arc(x, y, 24, 0, 2 * Math.PI);
                   ctx.fillStyle = gradient;
                   ctx.fill();
 
                   // Draw control point
                   ctx.beginPath();
-                  ctx.arc(indexTip.x * displayWidth, y, 12, 0, 2 * Math.PI); // Bigger control point
+                  ctx.arc(x, y, 12, 0, 2 * Math.PI); // Bigger control point
                   ctx.fillStyle = '#9933FF';
                   ctx.fill();
                   ctx.strokeStyle = '#FFFFFF';
@@ -650,10 +606,10 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
                   ctx.beginPath();
                   ctx.strokeStyle = '#FFFFFF';
                   ctx.lineWidth = 2;
-                  ctx.moveTo(indexTip.x * displayWidth - crosshairSize, y);
-                  ctx.lineTo(indexTip.x * displayWidth + crosshairSize, y);
-                  ctx.moveTo(indexTip.x * displayWidth, y - crosshairSize);
-                  ctx.lineTo(indexTip.x * displayWidth, y + crosshairSize);
+                  ctx.moveTo(x - crosshairSize, y);
+                  ctx.lineTo(x + crosshairSize, y);
+                  ctx.moveTo(x, y - crosshairSize);
+                  ctx.lineTo(x, y + crosshairSize);
                   ctx.stroke();
 
                   // Restore context state
