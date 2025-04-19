@@ -1,3 +1,10 @@
+# Gesture Commander
+
+A hand gesture recognition project built with React, TypeScript, and Vite.
+
+## Project Status
+🟡 **On Hold**: The project is currently on hold. The initial goals have been accomplished, and development will resume when new features or improvements are planned.
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
