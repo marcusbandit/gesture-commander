@@ -108,6 +108,8 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
   const [gestureState, setGestureState] = useState<GestureState>(INITIAL_GESTURE_STATE);
   const currentGestureState = useRef<GestureState>(INITIAL_GESTURE_STATE);
   const [isCameraReady, setIsCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isSavingImage, setIsSavingImage] = useState(false);
   const { setBrightness } = useBrightness();
 
   // Add delay before starting camera
@@ -123,6 +125,71 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
   useEffect(() => {
     currentGestureState.current = gestureState;
   }, [gestureState]);
+
+  // Handle camera errors
+  const handleUserMediaError = (error: string | DOMException) => {
+    console.error('Camera access error:', error);
+    setCameraError(
+      error instanceof DOMException 
+        ? `Camera access denied: ${error.message}` 
+        : 'Failed to access camera. Please check your browser permissions and ensure you\'re using HTTPS.'
+    );
+  };
+
+  // Handle spacebar press to save image
+  const handleKeyPress = useCallback((event: KeyboardEvent) => {
+    if (event.code === 'Space' && webcamRef.current?.video && !isSavingImage) {
+      event.preventDefault();
+      setIsSavingImage(true);
+      
+      // Create a canvas to capture the current frame with overlay
+      const canvas = document.createElement('canvas');
+      const video = webcamRef.current.video;
+      const ctx = canvas.getContext('2d');
+      
+      if (ctx && video.videoWidth > 0 && video.videoHeight > 0) {
+        // Set canvas size to match video dimensions
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        
+        // Draw the current video frame to canvas
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Draw the overlay from the existing canvas
+        const overlayCanvas = canvasRef.current;
+        if (overlayCanvas) {
+          ctx.drawImage(overlayCanvas, 0, 0, canvas.width, canvas.height);
+        }
+        
+        // Convert canvas to blob and download
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'image.png';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            console.log('Image saved as image.png with overlay');
+          }
+          setIsSavingImage(false);
+        }, 'image/png');
+      } else {
+        setIsSavingImage(false);
+      }
+    }
+  }, [isSavingImage]);
+
+  // Add keyboard event listener
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyPress);
+    return () => {
+      document.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [handleKeyPress]);
 
   // Calculate finger extension for more accurate open hand detection
   const calculateFingerExtension = useCallback((landmarks: any) => {
@@ -333,7 +400,7 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
     });
 
     hands.setOptions({
-      maxNumHands: 2,
+      maxNumHands: 10, // Increased from 2 to allow more hands
       modelComplexity: 1,
       minDetectionConfidence: 0.7,
       minTrackingConfidence: 0.7,
@@ -363,20 +430,16 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
       // Clear the canvas
       ctx.clearRect(0, 0, displayWidth, displayHeight);
 
-      if (results.multiHandLandmarks) {
-        const newHandsInfo: HandsState = {
-          left: { ...INITIAL_HAND_INFO },
-          right: { ...INITIAL_HAND_INFO }
-        };
-        // Ensure only one hand per classification label (left/right)
-        const seenLabels: Record<string, boolean> = {};
-        
-        results.multiHandLandmarks.forEach((landmarks, index) => {
-          const handedness = results.multiHandedness[index];
-          // Skip duplicate labels to allow only one left and one right hand
-          const label = handedness.label.toLowerCase();
-          if (seenLabels[label]) return;
-          seenLabels[label] = true;
+              if (results.multiHandLandmarks) {
+          const newHandsInfo: HandsState = {
+            left: { ...INITIAL_HAND_INFO },
+            right: { ...INITIAL_HAND_INFO }
+          };
+          
+          // Process all detected hands
+          results.multiHandLandmarks.forEach((landmarks, index) => {
+            const handedness = results.multiHandedness[index];
+            const label = handedness.label.toLowerCase();
           
           // Mirror the landmarks
           const mirroredLandmarks = landmarks.map(landmark => ({
@@ -891,6 +954,7 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
           });
 
           // Invert the handedness for correct user perspective
+          // For multiple hands, we'll keep the most recent detection of each type
           if (handedness.label.toLowerCase() === 'right') {
               newHandsInfo.left = handInfo; // User's left hand
             } else {
@@ -920,7 +984,7 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
   return (
     <div className="hand-tracking-container">
       <div className="video-container">
-        {isCameraReady && (
+        {isCameraReady && !cameraError && (
           <Webcam
             ref={webcamRef}
             mirrored={true}
@@ -935,7 +999,27 @@ const HandTracking: React.FC<HandTrackingProps> = () => {
               height: '100%',
               objectFit: 'contain'
             }}
+            onUserMediaError={handleUserMediaError}
           />
+        )}
+        {cameraError && (
+          <div className="camera-error">
+            <h3>Camera Access Error</h3>
+            <p>{cameraError}</p>
+            <p>Please ensure:</p>
+            <ul>
+              <li>You're using HTTPS (required for camera access)</li>
+              <li>Camera permissions are granted</li>
+              <li>No other applications are using the camera</li>
+              <li>You're using a modern browser (Chrome, Firefox, Safari, Edge)</li>
+            </ul>
+          </div>
+        )}
+        {isSavingImage && (
+          <div className="saving-indicator">
+            <div className="saving-spinner"></div>
+            <p>Saving image...</p>
+          </div>
         )}
         <canvas
           ref={canvasRef}
